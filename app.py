@@ -146,6 +146,12 @@ else:
     # === INICIO ===
     if pagina == "inicio":
         st.subheader("🎓 Bienvenido/a a Acompáñame")
+        
+        # Mostrar mensaje de éxito si existe
+        if "mensaje_exito" in st.session_state:
+            st.success(st.session_state.mensaje_exito)
+            del st.session_state.mensaje_exito  # Limpiar después de mostrar
+        
         st.info("Usa la barra inferior para navegar.")
         col1, col2 = st.columns(2)
         with col1:
@@ -178,7 +184,8 @@ else:
                     "fecha_limite": str(fecha_limite),
                     "completada": False
                 })
-                st.success("✅ Tarea añadida")
+                st.session_state.mensaje_exito = "✅ Tarea añadida"
+                st.session_state.pagina = "inicio"
                 st.rerun()
         
         pendientes = [t for t in tareas_usuario if not t["completada"]]
@@ -191,11 +198,13 @@ else:
                 with col2:
                     if st.button("✅", key=f"comp_{t['id']}_{codigo}"):
                         t["completada"] = True
+                        st.session_state.mensaje_exito = "✅ Tarea completada"
+                        st.session_state.pagina = "inicio"
                         st.rerun()
         else:
             st.success("¡No tienes tareas pendientes!")
 
-    # === SOLICITAR ASESORÍA (CORREGIDO) ===
+    # === SOLICITAR ASESORÍA (CORREGIDO CON MENSAJE DE ÉXITO) ===
     elif pagina == "asesoria" and st.session_state.rol == "estudiante":
         st.subheader("🆘 Solicitar asesoría")
         tutor_nombre = TUTORES[st.session_state.id_tutor]["nombre"]
@@ -216,7 +225,8 @@ else:
                     "estado": "pendiente"
                 }
                 st.session_state.solicitudes.append(nueva_solicitud)
-                st.success("✅ Solicitud enviada. Tu tutor será notificado.")
+                st.session_state.mensaje_exito = "✅ Solicitud enviada. Tu tutor será notificado."
+                st.session_state.pagina = "inicio"
                 st.rerun()
 
     # === PANEL DEL TUTOR ===
@@ -240,7 +250,9 @@ else:
             with col2:
                 if st.button("💾 Guardar", key=f"guardar_{cod}"):
                     st.session_state.estado_alumnos[cod] = nuevo_estado
-                    st.success("✅ Estado actualizado")
+                    st.session_state.mensaje_exito = "✅ Estado actualizado"
+                    st.session_state.pagina = "inicio"
+                    st.rerun()
             
             if cod in st.session_state.tareas_globales:
                 tareas = st.session_state.tareas_globales[cod]
@@ -278,6 +290,8 @@ else:
                             "texto": txt,
                             "fecha": datetime.now().strftime("%H:%M")
                         })
+                        st.session_state.mensaje_exito = "✅ Mensaje enviado"
+                        st.session_state.pagina = "inicio"
                         st.rerun()
         else:
             st.info("No tienes conversaciones activas.")
@@ -294,7 +308,8 @@ else:
                 s["fecha_aceptacion"] = datetime.now().strftime("%Y-%m-%d %H:%M")
                 s["estado"] = "en_chat"
                 st.session_state.mensajes_chat[s["id"]] = []
-                st.success("✅ Sesión iniciada.")
+                st.session_state.mensaje_exito = "✅ Sesión iniciada. Usa la pestaña 'Chat'."
+                st.session_state.pagina = "inicio"
                 st.rerun()
             st.divider()
 
