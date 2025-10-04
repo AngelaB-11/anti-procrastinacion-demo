@@ -1,6 +1,5 @@
 import streamlit as st
 from datetime import datetime
-import json
 
 # === ESTILOS UPC ===
 st.markdown("""
@@ -44,7 +43,7 @@ TUTORES = {
 if "inicializado" not in st.session_state:
     st.session_state.solicitudes = []
     st.session_state.mensajes_chat = {}
-    st.session_state.tareas_globales = {}  # tareas por estudiante
+    st.session_state.tareas_globales = {}
     st.session_state.estado_alumnos = {
         "UPC2025-001": "en_proceso",
         "UPC2025-002": "inicio",
@@ -60,27 +59,9 @@ if "usuario_autenticado" not in st.session_state:
     st.session_state.id_tutor = None
     st.session_state.pagina = "inicio"
 
-# === FUNCIÓN PARA GUARDAR EN GOOGLE SHEETS ===
-def guardar_en_sheet(datos, hoja="solicitudes"):
-    try:
-        import gspread
-        gc = gspread.service_account_from_dict({
-            "type": "service_account",
-            "project_id": "streamlit",
-            "private_key_id": "",
-            "private_key": "-----BEGIN PRIVATE KEY-----\n\n-----END PRIVATE KEY-----\n",
-            "client_email": "streamlit@streamlit.iam.gserviceaccount.com",
-            "client_id": "",
-            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-            "token_uri": "https://oauth2.googleapis.com/token",
-            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-            "client_x509_cert_url": ""
-        })
-        sheet = gc.open_by_url(st.secrets["google_sheet"]["url"]).worksheet(hoja)
-        sheet.append_row(datos)
-        return True
-    except:
-        return False
+# === FUNCIÓN SIMPLIFICADA (sin Google Sheets) ===
+def guardar_en_sheet(datos):
+    return True  # Solo para compatibilidad, no hace nada
 
 # === PANTALLA DE ACCESO ===
 if not st.session_state.usuario_autenticado:
@@ -214,7 +195,7 @@ else:
         else:
             st.success("¡No tienes tareas pendientes!")
 
-    # === SOLICITAR ASESORÍA ===
+    # === SOLICITAR ASESORÍA (CORREGIDO) ===
     elif pagina == "asesoria" and st.session_state.rol == "estudiante":
         st.subheader("🆘 Solicitar asesoría")
         tutor_nombre = TUTORES[st.session_state.id_tutor]["nombre"]
@@ -235,23 +216,12 @@ else:
                     "estado": "pendiente"
                 }
                 st.session_state.solicitudes.append(nueva_solicitud)
-                guardar_en_sheet([
-                    nueva_solicitud["id"],
-                    nueva_solicitud["estudiante"],
-                    nueva_solicitud["tutor_id"],
-                    nueva_solicitud["mensaje"],
-                    nueva_solicitud["fecha_envio"],
-                    "",
-                    "pendiente"
-                ])
                 st.success("✅ Solicitud enviada. Tu tutor será notificado.")
                 st.rerun()
 
-    # === PANEL DEL TUTOR (GESTIÓN DE ALUMNOS) ===
+    # === PANEL DEL TUTOR ===
     elif pagina == "tutor" and st.session_state.rol == "tutor":
         st.subheader("📊 Mis alumnos")
-        
-        # Filtrar alumnos asignados a este tutor
         mis_alumnos = [cod for cod, datos in ESTUDIANTES.items() if datos["tutor_id"] == st.session_state.id_tutor]
         
         for cod in mis_alumnos:
@@ -272,7 +242,6 @@ else:
                     st.session_state.estado_alumnos[cod] = nuevo_estado
                     st.success("✅ Estado actualizado")
             
-            # Mostrar tareas del alumno
             if cod in st.session_state.tareas_globales:
                 tareas = st.session_state.tareas_globales[cod]
                 completadas = sum(1 for t in tareas if t["completada"])
@@ -284,8 +253,6 @@ else:
     # === CHAT ===
     elif pagina == "chat":
         st.subheader("💬 Chat de asesoría")
-        
-        # Encontrar chats activos
         if st.session_state.rol == "estudiante":
             chats = [s for s in st.session_state.solicitudes 
                     if s["estudiante_codigo"] == st.session_state.codigo and s["estado"] == "en_chat"]
@@ -298,12 +265,10 @@ else:
             otro_usuario = "Tutor" if st.session_state.rol == "estudiante" else solicitud["estudiante"]
             st.info(f"Conversación con: {otro_usuario}")
             
-            # Mostrar mensajes
             mensajes = st.session_state.mensajes_chat.get(solicitud["id"], [])
             for msg in mensajes:
                 st.text(f"{msg['usuario']} ({msg['fecha']}): {msg['texto']}")
             
-            # Enviar mensaje
             with st.form(f"chat_form_{solicitud['id']}"):
                 txt = st.text_input("Mensaje")
                 if st.form_submit_button("Enviar"):
@@ -315,9 +280,25 @@ else:
                         })
                         st.rerun()
         else:
-            st.info("No tienes conversaciones activas. Espera a que tu tutor acepte tu solicitud.")
+            st.info("No tienes conversaciones activas.")
 
     # === SOLICITUDES PARA TUTOR ===
+    elif pagina == "asesoria" and st.session_state.rol == "tutor":
+        st.subheader("📬 Solicitudes pendientes")
+        mis_solicitudes = [s for s in st.session_state.solicitudes 
+                          if s["tutor_id"] == st.session_state.id_tutor and s["estado"] == "pendiente"]
+        for s in mis_solicitudes:
+            st.markdown(f"**Estudiante:** {s['estudiante']} ({s['estudiante_codigo']})")
+            st.markdown(f"**Mensaje:** {s['mensaje']}")
+            if st.button("✅ Aceptar", key=f"aceptar_{s['id']}"):
+                s["fecha_aceptacion"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+                s["estado"] = "en_chat"
+                st.session_state.mensajes_chat[s["id"]] = []
+                st.success("✅ Sesión iniciada.")
+                st.rerun()
+            st.divider()
+
+    # === MIS SOLICITUDES (ESTUDIANTE) ===
     elif pagina == "tutor" and st.session_state.rol == "estudiante":
         st.subheader("📋 Mis solicitudes")
         mis_solicitudes = [s for s in st.session_state.solicitudes if s["estudiante_codigo"] == st.session_state.codigo]
@@ -331,19 +312,3 @@ else:
                 st.divider()
         else:
             st.info("No has enviado solicitudes.")
-
-    # === ACEPTAR SOLICITUDES (TUTOR) ===
-    elif pagina == "asesoria" and st.session_state.rol == "tutor":
-        st.subheader("📬 Solicitudes pendientes")
-        mis_solicitudes = [s for s in st.session_state.solicitudes 
-                          if s["tutor_id"] == st.session_state.id_tutor and s["estado"] == "pendiente"]
-        for s in mis_solicitudes:
-            st.markdown(f"**Estudiante:** {s['estudiante']} ({s['estudiante_codigo']})")
-            st.markdown(f"**Mensaje:** {s['mensaje']}")
-            if st.button("✅ Aceptar", key=f"aceptar_{s['id']}"):
-                s["fecha_aceptacion"] = datetime.now().strftime("%Y-%m-%d %H:%M")
-                s["estado"] = "en_chat"
-                st.session_state.mensajes_chat[s["id"]] = []
-                st.success("✅ Sesión iniciada. Usa la pestaña 'Chat'.")
-                st.rerun()
-            st.divider()
