@@ -36,7 +36,8 @@ def cargar_datos():
             "estados": {},
             "events": {},
             "estudiantes": {},
-            "config": {}
+            "config": {},
+            "recompensas": {}  # NUEVO: sistema de recompensas
         }
         default_est = {
             "UPC2025-001": {"nombre": "María García", "tutor_id": "tutor_juan", "activo": True, "permitir_crear_tareas": False},
@@ -45,6 +46,7 @@ def cargar_datos():
         }
         data["estudiantes"].update(default_est)
         data["estados"] = {k: "inicio" for k in default_est.keys()}
+        data["recompensas"] = {k: {"sesiones_enfoque": 0, "puntos": 0} for k in default_est.keys()}  # Inicializar recompensas
         with open(DATA_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
         return data
@@ -54,7 +56,7 @@ def cargar_datos():
 
     # asegurar claves
     defaults = {
-        "solicitudes": [], "mensajes": {}, "tareas": {}, "estados": {}, "events": {}, "estudiantes": {}, "config": {}
+        "solicitudes": [], "mensajes": {}, "tareas": {}, "estados": {}, "events": {}, "estudiantes": {}, "config": {}, "recompensas": {}
     }
     for k, v in defaults.items():
         if k not in data:
@@ -70,6 +72,9 @@ def cargar_datos():
         if k not in data["estudiantes"]:
             data["estudiantes"][k] = v
             data["estados"][k] = "inicio"
+        # Asegurar recompensas para cada estudiante
+        if k not in data["recompensas"]:
+            data["recompensas"][k] = {"sesiones_enfoque": 0, "puntos": 0}
 
     return data
 
@@ -97,6 +102,9 @@ if "usuario_autenticado" not in st.session_state:
     st.session_state.pagina = "inicio"
     st.session_state.mensaje_exito = ""
     st.session_state.pagina_focus = {}
+    st.session_state.enfoque_activo = False
+    st.session_state.tiempo_restante = 25 * 60
+    st.session_state.sesion_iniciada = False
 
 def mostrar_mensaje_exito():
     if st.session_state.get("mensaje_exito"):
@@ -186,8 +194,8 @@ else:
             st.rerun()
 
     st.markdown("---")
-    # Barra de navegación HORIZONTAL (forzar layout horizontal con st.columns)
-    nav_cols = st.columns(5)
+    # Barra de navegación HORIZONTAL (6 columnas)
+    nav_cols = st.columns(6)
     with nav_cols[0]:
         if st.button("🏠 Inicio", key="nav_inicio", use_container_width=True):
             st.session_state.pagina = "inicio"; st.rerun()
@@ -195,16 +203,33 @@ else:
         if st.button("✅ Tareas", key="nav_tareas", use_container_width=True):
             st.session_state.pagina = "tareas"; st.rerun()
     with nav_cols[2]:
+        if st.button("🎯 Enfoque", key="nav_enfoque", use_container_width=True):
+            st.session_state.pagina = "enfoque"; st.rerun()
+    with nav_cols[3]:
         if st.button("🆘 Asesoría", key="nav_asesoria", use_container_width=True):
             st.session_state.pagina = "asesoria"; st.rerun()
-    with nav_cols[3]:
+    with nav_cols[4]:
         if st.button("💬 Chat", key="nav_chat", use_container_width=True):
             st.session_state.pagina = "chat"; st.rerun()
     label_tutor = "👨‍🏫 Tutor" if st.session_state.rol=="estudiante" else "📊 Alumnos"
-    with nav_cols[4]:
+    with nav_cols[5]:
         if st.button(label_tutor, key="nav_tutor", use_container_width=True):
             st.session_state.pagina = "tutor"; st.rerun()
 
+    # Actualizar página según botones de navegación
+    if "nav_inicio" in st.session_state and st.session_state.nav_inicio:
+        st.session_state.pagina = "inicio"
+    elif "nav_tareas" in st.session_state and st.session_state.nav_tareas:
+        st.session_state.pagina = "tareas"
+    elif "nav_enfoque" in st.session_state and st.session_state.nav_enfoque:
+        st.session_state.pagina = "enfoque"
+    elif "nav_asesoria" in st.session_state and st.session_state.nav_asesoria:
+        st.session_state.pagina = "asesoria"
+    elif "nav_chat" in st.session_state and st.session_state.nav_chat:
+        st.session_state.pagina = "chat"
+    elif "nav_tutor" in st.session_state and st.session_state.nav_tutor:
+        st.session_state.pagina = "tutor"
+    
     pagina = st.session_state.pagina
 
     # ---------------------------
@@ -220,6 +245,21 @@ else:
             porc = int((completadas/total)*100) if total else 0
             st.markdown(f"**Progreso de tareas:** {completadas}/{total} — {porc}%")
             st.progress(porc/100 if total else 0)
+            
+            # Mostrar progreso de recompensas
+            sesiones = data["recompensas"][st.session_state.codigo]["sesiones_enfoque"]
+            st.markdown(f"**Sesiones de enfoque:** {sesiones}/20")
+            st.progress(min(sesiones / 20, 1.0))
+            if sesiones >= 5:
+                st.markdown("### 🎁 ¡Recompensas disponibles!")
+                if sesiones >= 5:
+                    st.markdown("• **Entrada de cine gratis**")
+                if sesiones >= 10:
+                    st.markdown("• **Almuerzo gratis en cafetería UPC**")
+                if sesiones >= 15:
+                    st.markdown("• **Liberación de tarea tipo**")
+                if sesiones >= 20:
+                    st.markdown("• **Reconocimiento institucional**")
 
         # Mostrar próximos eventos del usuario
         eventos_usuario = []
@@ -285,6 +325,93 @@ else:
                         st.rerun()
         else:
             st.info("Selecciona un alumno (si eres tutor) o inicia sesión como estudiante.")
+
+    # ---------------------------
+    # MODO ENFOQUE
+    # ---------------------------
+    elif pagina == "enfoque":
+        st.subheader("🎯 Modo Enfoque")
+        
+        if not st.session_state.enfoque_activo:
+            st.info("Activa el modo enfoque para ganar puntos y recompensas institucionales")
+            col1, col2 = st.columns(2)
+            with col1:
+                duracion = st.selectbox("Duración", ["25 min", "50 min"], key="duracion_enfoque")
+            with col2:
+                if st.button("🚀 Iniciar sesión de enfoque"):
+                    st.session_state.enfoque_activo = True
+                    st.session_state.tiempo_restante = 25 * 60 if duracion == "25 min" else 50 * 60
+                    st.session_state.sesion_iniciada = True
+                    st.rerun()
+        else:
+            # Mostrar temporizador
+            mins, secs = divmod(st.session_state.tiempo_restante, 60)
+            st.markdown(f"<h1 style='text-align: center; color: #C8102E;'>{mins:02d}:{secs:02d}</h1>", unsafe_allow_html=True)
+            
+            st.warning("¡No abandones esta página! Estás en modo enfoque.")
+            
+            if st.session_state.tiempo_restante > 0 and st.session_state.sesion_iniciada:
+                import time
+                time.sleep(1)
+                st.session_state.tiempo_restante -= 1
+                st.rerun()
+            else:
+                st.session_state.enfoque_activo = False
+                st.session_state.sesion_iniciada = False
+                
+                # Registrar sesión completada
+                if st.session_state.rol == "estudiante":
+                    data["recompensas"][st.session_state.codigo]["sesiones_enfoque"] += 1
+                    data["recompensas"][st.session_state.codigo]["puntos"] += 10
+                    guardar_datos(data)
+                
+                st.balloons()
+                st.success("🎉 ¡Excelente! Has completado una sesión de enfoque.")
+                st.info("Acumulas puntos para recompensas institucionales.")
+                
+                if st.button("Volver al inicio"):
+                    st.session_state.pagina = "inicio"
+                    st.rerun()
+
+    # ---------------------------
+    # RECURSOS ANTI-DISTRACCIÓN
+    # ---------------------------
+    elif pagina == "recursos":
+        st.subheader("🛡️ Herramientas para evitar distracciones")
+        
+        st.markdown("### 📱 Aplicaciones recomendadas")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("#### **Celular**")
+            st.markdown("- **iOS**: [Tiempo de uso](https://support.apple.com/es-es/102660)")
+            st.markdown("- **Android**: [Bienestar digital](https://wellbeing.google.com/)")
+        with col2:
+            st.markdown("#### **Computadora**")
+            st.markdown("- **Windows/Mac**: [Cold Turkey](https://getcoldturkey.com/)")
+            st.markdown("- **Chrome**: [StayFocusd](https://stayfocusd.com/)")
+        
+        st.markdown("### 🧠 Técnicas de autorregulación")
+        st.markdown("""
+        1. **Teléfono en modo avión** durante sesiones de estudio
+        2. **Estudia en espacios públicos** (biblioteca, cafetería)
+        3. **Compromiso público**: comparte tus metas con tu tutor
+        """)
+        
+        st.markdown("### 🎁 Sistema de recompensas UPC")
+        st.markdown("""
+        - **5 sesiones** = Entrada de cine gratis
+        - **10 sesiones** = Almuerzo gratis en cafetería UPC  
+        - **15 sesiones** = Liberación de una tarea tipo en tus cursos
+        - **20 sesiones** = Reconocimiento en ceremonia de innovación
+        """)
+        
+        # Mostrar progreso del estudiante
+        if st.session_state.rol == "estudiante":
+            sesiones = data["recompensas"][st.session_state.codigo]["sesiones_enfoque"]
+            st.progress(min(sesiones / 20, 1.0))
+            st.caption(f"Sesiones completadas: {sesiones}/20")
+            puntos = data["recompensas"][st.session_state.codigo]["puntos"]
+            st.caption(f"Puntos acumulados: {puntos}")
 
     # ---------------------------
     # ASESORIA - estudiante
@@ -528,6 +655,7 @@ f"BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Acompaname UPC//EN\nBEGIN:VEVENT\nUID:
                 else:
                     data["estudiantes"][codeu] = {"nombre": nuevo_nombre, "tutor_id": st.session_state.id_tutor, "activo": True, "permitir_crear_tareas": permitir_crear}
                     data["estados"][codeu] = "inicio"
+                    data["recompensas"][codeu] = {"sesiones_enfoque": 0, "puntos": 0}  # Inicializar recompensas
                     guardar_datos(data)
                     st.session_state.mensaje_exito = f"Alumno {nuevo_nombre} inscrito correctamente"
                     st.rerun()
